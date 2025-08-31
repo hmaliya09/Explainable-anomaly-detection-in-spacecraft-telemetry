@@ -1,0 +1,546 @@
+# import pandas as pd
+
+# # Load the labeled anomalies CSV
+# df_anomalies = pd.read_csv('/kaggle/input/nasa-anomaly-detection-dataset-smap-msl/labeled_anomalies.csv')
+
+# # Display first few rows
+# # df_anomalies.head()
+
+import pandas as pd
+
+# Load labeled anomalies file
+df_anomalies = pd.read_csv('/content/nasa-anomaly-detection-dataset-smap-msl/labeled_anomalies.csv')
+
+# Display unique telemetry channels
+print(df_anomalies['chan_id'].unique())
+
+# Check anomalies for a specific channel
+df_anomalies[df_anomalies['chan_id'] == 'P-1']
+
+!pip install opendatasets
+
+import opendatasets as od
+
+import numpy as np
+
+# Load the telemetry data
+data = np.load('/content/nasa-anomaly-detection-dataset-smap-msl/data/data/test/P-1.npy')
+
+# Check the shape of the data
+print("Data Shape:", data.shape)
+
+# Display the first 5 values
+print("First 5 data points:\n", data[:5])
+
+import numpy as np
+
+# Load the data
+data = np.load('/content/nasa-anomaly-detection-dataset-smap-msl/data/data/test/P-1.npy')
+
+# Find columns with nonzero values
+nonzero_columns = np.where(data.any(axis=0))[0]
+print("Columns with nonzero values:", nonzero_columns)
+
+# Now I gather the statistics of other nonzero entries/columns
+
+import pandas as pd
+
+# Convert to DataFrame for better readability
+df = pd.DataFrame(data)
+
+# Get summary statistics for only active columns
+print(df.iloc[:, nonzero_columns].describe())
+
+import pandas as pd
+
+df_labels = pd.read_csv("/content/nasa-anomaly-detection-dataset-smap-msl/labeled_anomalies.csv")
+print(df_labels.head())
+
+# This is my attempt to plot the values of only the first 5 sensors which have values i.e. non-zero to
+# better understand the behaviour of sensors over time and see trends
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 6))
+
+# Plot selected nonzero columns
+for col in nonzero_columns[:5]:  # Plot only the first 5 active channels
+    plt.plot(data[:, col], label=f"Channel {col}")
+
+plt.xlabel("Time Step")
+plt.ylabel("Sensor Value")
+plt.title("Active Telemetry Channels Over Time")
+plt.legend()
+plt.show()
+
+
+# import os
+
+# data_path = "/kaggle/input/nasa-anomaly-detection-dataset-smap-msl/data/data/"
+
+# # List all available subdirectories and files
+# for root, dirs, files in os.walk(data_path):
+#     print(f"📂 Folder: {root}")
+#     for file in files:
+#         print(f"   📄 {file}")
+
+import os
+
+data_path = "/content/nasa-anomaly-detection-dataset-smap-msl/data/data"
+print(os.listdir(data_path))
+
+for item in os.listdir(data_path):
+    print(item, "->", "Directory" if os.path.isdir(os.path.join(data_path, item)) else "File")
+
+print(os.listdir(os.path.join(data_path, "train")))
+print(os.listdir(os.path.join(data_path, "test")))
+
+import numpy as np
+
+file_path = os.path.join(data_path, "train", "M-4.npy")  # Example file
+data = np.load(file_path)
+print(data.shape)  # Check dimensions
+print(data)  # Display sample data
+
+print(os.listdir(os.path.join(data_path, "2018-05-19_15.00.10")))
+
+# I plot a few datapoints to check for anomalies
+
+import matplotlib.pyplot as plt
+
+plt.plot(data[:, 0])  # Example: Plot first column
+plt.title("Feature 1 over Time")
+plt.show()
+
+# Histogram analysis which would confirm if the data is categorical if there are only a few unique values
+
+import numpy as np
+
+plt.hist(data[:, 0], bins=50)
+plt.title("Distribution of Feature 1")
+plt.show()
+
+#From the output I cannot tell exactly if the particular feature is categorical or not because although
+# there are dominant peaks and few unique values, there are also intermediate values and a sort of continuity which could indicate a
+# continuous feature with a sort of threshold instead of strictly categorical
+
+import numpy as np
+import os
+
+print(os.listdir(os.path.join(data_path, "/content/nasa-anomaly-detection-dataset-smap-msl/data/data/2018-05-19_15.00.10/y_hat")))
+
+# Now I'm going back to the zero columns to analyse them
+
+zero_columns = [i for i in range(data.shape[1]) if i not in nonzero_columns]
+print("Columns with only zero values:", zero_columns)
+
+from sklearn.preprocessing import StandardScaler
+from datetime import datetime, timedelta
+
+# Define paths
+base_path = '/content/nasa-anomaly-detection-dataset-smap-msl'
+data_path = os.path.join(base_path, 'data/data')
+
+# 1. Load and preprocess the labeled anomalies
+def load_anomaly_labels():
+    """Load the labeled anomalies CSV and preprocess it"""
+    df_anomalies = pd.read_csv(os.path.join(base_path, 'labeled_anomalies.csv'))
+
+    # Convert anomaly windows to list of dictionaries
+    anomaly_windows = []
+    for _, row in df_anomalies.iterrows():
+        channel = row['chan_id']
+        # Parse anomaly sequences
+        if isinstance(row['anomaly_sequences'], str):
+            sequences = eval(row['anomaly_sequences'])
+            for seq in sequences:
+                anomaly_windows.append({
+                    'channel': channel,
+                    'spacecraft': row['spacecraft'],
+                    'start': seq[0],
+                    'end': seq[1]
+                })
+
+    return df_anomalies, pd.DataFrame(anomaly_windows)
+
+# 2. Function to create binary labels for a specific channel
+def create_binary_labels(channel_id, data_length, anomaly_windows_df):
+    """
+    Create binary labels (0: normal, 1: anomaly) for a specific channel
+
+    Args:
+        channel_id: The telemetry channel ID
+        data_length: Length of the telemetry data
+        anomaly_windows_df: DataFrame containing anomaly windows
+
+    Returns:
+        Binary labels array
+    """
+    labels = np.zeros(data_length)
+
+    # Filter anomaly windows for this channel
+    channel_anomalies = anomaly_windows_df[anomaly_windows_df['channel'] == channel_id]
+
+    # Mark anomalies as 1
+    for _, anomaly in channel_anomalies.iterrows():
+        start_idx = anomaly['start']
+        end_idx = anomaly['end']
+
+        # Ensure indices are within bounds
+        if start_idx < data_length and end_idx <= data_length:
+            labels[start_idx:end_idx] = 1
+
+    return labels
+
+# 3. Feature extraction function
+def extract_features(data, window_size=10):
+    """
+    Extract statistical features from time series data using sliding windows
+
+    Args:
+        data: Numpy array of telemetry data
+        window_size: Size of sliding window for feature extraction
+
+    Returns:
+        Array of extracted features
+    """
+    n_samples, n_features = data.shape
+    features = []
+
+    for i in range(n_samples - window_size + 1):
+        window = data[i:i+window_size, :]
+
+        # Calculate statistical features for each channel
+        window_features = []
+        for j in range(n_features):
+            # Only process nonzero columns
+            if np.any(window[:, j]):
+                # Basic statistical features
+                mean = np.mean(window[:, j])
+                std = np.std(window[:, j])
+                min_val = np.min(window[:, j])
+                max_val = np.max(window[:, j])
+                median = np.median(window[:, j])
+
+                # Rate of change features
+                diff = np.diff(window[:, j])
+                mean_diff = np.mean(diff) if len(diff) > 0 else 0
+                max_diff = np.max(np.abs(diff)) if len(diff) > 0 else 0
+
+                window_features.extend([mean, std, min_val, max_val, median, mean_diff, max_diff])
+
+        features.append(window_features)
+
+    return np.array(features)
+
+# 4. Get common nonzero columns between train and test datasets
+def get_common_active_columns(channel_id):
+    """
+    Find active columns that are common between train and test datasets
+
+    Args:
+        channel_id: The telemetry channel ID
+
+    Returns:
+        Common active columns
+    """
+    # Load train data
+    train_path = os.path.join(data_path, 'train', f"{channel_id}.npy")
+    train_data = np.load(train_path)
+
+    # Load test data
+    test_path = os.path.join(data_path, 'test', f"{channel_id}.npy")
+    test_data = np.load(test_path)
+
+    # Find active columns in both datasets
+    train_active = np.where(train_data.any(axis=0))[0]
+    test_active = np.where(test_data.any(axis=0))[0]
+
+    # Find common active columns
+    common_active = np.intersect1d(train_active, test_active)
+
+    return common_active
+
+# 5. Load and preprocess telemetry data for a specific channel
+def preprocess_channel(channel_id, mode='train', common_columns=None, scaler=None):
+    """
+    Load and preprocess telemetry data for a specific channel
+
+    Args:
+        channel_id: The telemetry channel ID
+        mode: 'train' or 'test'
+        common_columns: List of common active columns between train and test
+        scaler: StandardScaler fitted on training data (for test mode)
+
+    Returns:
+        Preprocessed data and optionally normalized data
+    """
+    # Load data
+    file_path = os.path.join(data_path, mode, f"{channel_id}.npy")
+    data = np.load(file_path)
+
+    # Use common columns if provided, otherwise find active columns
+    if common_columns is not None:
+        active_columns = common_columns
+    else:
+        active_columns = np.where(data.any(axis=0))[0]
+
+    # Filter to keep only active columns
+    filtered_data = data[:, active_columns]
+
+    # Handle missing values (NaN or inf)
+    filtered_data = np.nan_to_num(filtered_data)
+
+    # For training, fit a new scaler
+    if mode == 'train' and scaler is None:
+        scaler = StandardScaler()
+        normalized_data = scaler.fit_transform(filtered_data)
+        return filtered_data, normalized_data, active_columns, scaler
+
+    # For testing, use the provided scaler
+    elif mode == 'test' and scaler is not None:
+        normalized_data = scaler.transform(filtered_data)
+        return filtered_data, normalized_data, active_columns, scaler
+
+    # If no scaler is provided for test data, just return the filtered data
+    return filtered_data, None, active_columns, None
+
+# 6. Main preprocessing function
+def preprocess_anomaly_detection(channel_id, window_size=10, train_ratio=0.7):
+    """
+    Complete preprocessing pipeline for anomaly detection
+
+    Args:
+        channel_id: The telemetry channel ID
+        window_size: Size of sliding window for feature extraction
+        train_ratio: Ratio of data to use for training
+
+    Returns:
+        Processed data ready for anomaly detection model
+    """
+    # Load anomaly labels
+    anomalies_df, anomaly_windows_df = load_anomaly_labels()
+
+    # Check if channel exists in the dataset
+    if channel_id not in anomalies_df['chan_id'].values:
+        print(f"Channel {channel_id} not found in labeled anomalies.")
+        return None
+
+    # Find common active columns between train and test datasets
+    common_columns = get_common_active_columns(channel_id)
+
+    if len(common_columns) == 0:
+        print(f"No common active columns found for channel {channel_id}.")
+        return None
+
+    # Process training data with common columns
+    raw_train, normalized_train, _, scaler = preprocess_channel(
+        channel_id, mode='train', common_columns=common_columns
+    )
+
+    # Process test data with the same common columns and scaler
+    raw_test, normalized_test, _, _ = preprocess_channel(
+        channel_id, mode='test', common_columns=common_columns, scaler=scaler
+    )
+
+    # Create binary labels for test data
+    test_labels = create_binary_labels(channel_id, len(raw_test), anomaly_windows_df)
+
+    # Extract features
+    train_features = extract_features(normalized_train, window_size)
+    test_features = extract_features(normalized_test, window_size)
+
+    # Store original test data length
+    original_test_length = len(raw_test)
+
+    # Adjust labels to match feature length (due to windowing)
+    # Features are shortened due to windowing by (window_size - 1)
+    adjusted_test_labels = test_labels[window_size-1:]
+
+    # Ensure shapes match
+    if len(adjusted_test_labels) != len(test_features):
+        min_len = min(len(adjusted_test_labels), len(test_features))
+        adjusted_test_labels = adjusted_test_labels[:min_len]
+        test_features = test_features[:min_len]
+
+    return {
+        'train_features': train_features,
+        'test_features': test_features,
+        'test_labels': adjusted_test_labels,
+        'raw_test': raw_test,  # Store raw test data
+        'channel_id': channel_id,
+        'active_columns': common_columns,
+        'scaler': scaler,
+        'window_size': window_size,  # Store window size
+        'original_test_length': original_test_length  # Store original length
+    }
+
+# 7. Visualization function with fixed alignment
+def visualize_anomalies(channel_id, preprocessed_data, sample_size=1000):
+    """
+    Visualize raw data and labeled anomalies
+
+    Args:
+        channel_id: The telemetry channel ID
+        preprocessed_data: Output from preprocess_anomaly_detection
+        sample_size: Number of samples to visualize
+    """
+    # Get raw test data from preprocessed data
+    raw_test = preprocessed_data['raw_test']
+    active_columns = preprocessed_data['active_columns']
+
+    # Get labels and window size
+    labels = preprocessed_data['test_labels']
+    window_size = preprocessed_data['window_size']
+
+    # Create a timeline for the full dataset
+    timeline = np.arange(len(raw_test))
+
+    # Create a timeline for the windowed features/labels
+    feature_timeline = timeline[window_size-1:window_size-1+len(labels)]
+
+    # Ensure feature_timeline is not longer than labels
+    if len(feature_timeline) > len(labels):
+        feature_timeline = feature_timeline[:len(labels)]
+
+    # Limit to sample size
+    if sample_size > 0 and sample_size < len(feature_timeline):
+        sample_indices = np.arange(sample_size)
+        feature_timeline = feature_timeline[:sample_size]
+        labels = labels[:sample_size]
+    else:
+        sample_indices = np.arange(len(feature_timeline))
+
+    # Plot the data
+    plt.figure(figsize=(15, 10))
+
+    # Plot each active column
+    for i in range(min(5, len(active_columns))):
+        plt.subplot(min(5, len(active_columns)), 1, i+1)
+
+        # Plot the entire raw data for this column with lower opacity
+        plt.plot(timeline[:len(raw_test)], raw_test[:, i], 'k-', alpha=0.2, label='All data')
+
+        # Get indices for normal and anomalous points within our sample
+        normal_indices = sample_indices[labels[sample_indices] == 0]
+        anomaly_indices = sample_indices[labels[sample_indices] == 1]
+
+        # Plot normal points
+        if len(normal_indices) > 0:
+            plt.plot(feature_timeline[normal_indices],
+                     raw_test[feature_timeline[normal_indices], i],
+                     'b.', alpha=0.7, label='Normal')
+
+        # Plot anomalous points
+        if len(anomaly_indices) > 0:
+            plt.plot(feature_timeline[anomaly_indices],
+                     raw_test[feature_timeline[anomaly_indices], i],
+                     'r.', alpha=0.7, markersize=8, label='Anomaly')
+
+        plt.title(f'Feature {active_columns[i]} (Column {i})')
+        plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+# 8. Function to apply anomaly detection model (Isolation Forest example)
+def apply_isolation_forest(processed_data, contamination=0.05):
+    """
+    Apply Isolation Forest anomaly detection model
+
+    Args:
+        processed_data: Output from preprocess_anomaly_detection
+        contamination: Expected proportion of anomalies
+
+    Returns:
+        Predicted labels and anomaly scores
+    """
+    from sklearn.ensemble import IsolationForest
+
+    # Extract features
+    train_features = processed_data['train_features']
+    test_features = processed_data['test_features']
+
+    # Train the model
+    model = IsolationForest(contamination=contamination, random_state=42)
+    model.fit(train_features)
+
+    # Predict anomalies (-1 for anomalies, 1 for normal)
+    predictions = model.predict(test_features)
+    scores = model.decision_function(test_features)
+
+    # Convert to binary labels (1 for anomalies, 0 for normal)
+    binary_predictions = np.where(predictions == -1, 1, 0)
+
+    return binary_predictions, scores
+
+# 9. Evaluation function
+def evaluate_anomaly_detection(true_labels, predicted_labels):
+    """
+    Evaluate anomaly detection performance
+
+    Args:
+        true_labels: Ground truth labels (1 for anomalies, 0 for normal)
+        predicted_labels: Predicted labels (1 for anomalies, 0 for normal)
+
+    Returns:
+        Dictionary with evaluation metrics
+    """
+    from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+
+    # Calculate metrics
+    precision = precision_score(true_labels, predicted_labels)
+    recall = recall_score(true_labels, predicted_labels)
+    f1 = f1_score(true_labels, predicted_labels)
+    conf_matrix = confusion_matrix(true_labels, predicted_labels)
+
+    # Calculate true positive rate and false positive rate
+    tn, fp, fn, tp = conf_matrix.ravel()
+    tpr = tp / (tp + fn)  # Recall
+    fpr = fp / (fp + tn)  # Fall-out
+
+    # Create results dictionary
+    results = {
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1,
+        'confusion_matrix': conf_matrix,
+        'tpr': tpr,
+        'fpr': fpr
+    }
+
+    return results
+
+# Example usage
+if __name__ == "__main__":
+    # Example channel: 'P-1'
+    channel_id = 'P-1'
+
+    # Preprocess data
+    processed_data = preprocess_anomaly_detection(channel_id, window_size=10)
+
+    if processed_data:
+        print(f"Training features shape: {processed_data['train_features'].shape}")
+        print(f"Testing features shape: {processed_data['test_features'].shape}")
+        print(f"Test labels shape: {processed_data['test_labels'].shape}")
+        print(f"Anomaly ratio: {np.mean(processed_data['test_labels']):.2%}")
+
+        # Visualize before anomaly detection
+        print("Visualizing ground truth anomalies:")
+        visualize_anomalies(channel_id, processed_data, sample_size=1000)
+
+        # Apply anomaly detection
+        print("Applying Isolation Forest for anomaly detection...")
+        predicted_labels, scores = apply_isolation_forest(processed_data)
+
+        # Evaluate performance
+        results = evaluate_anomaly_detection(processed_data['test_labels'], predicted_labels)
+
+        print("\nPerformance metrics:")
+        print(f"Precision: {results['precision']:.4f}")
+        print(f"Recall: {results['recall']:.4f}")
+        print(f"F1 Score: {results['f1_score']:.4f}")
+        print(f"True Positive Rate: {results['tpr']:.4f}")
+        print(f"False Positive Rate: {results['fpr']:.4f}")
+        print("Confusion Matrix:")
+        print(results['confusion_matrix'])
